@@ -1,0 +1,35 @@
+# API Framework
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+pydantic==2.5.0
+pydantic-settings==2.1.0
+
+# LiveKit SDK
+livekit==0.12.0
+livekit-agents==0.8.0
+
+# Firebase
+firebase-admin==6.4.0
+
+# HTTP Client
+requests==2.31.0
+httpx==0.26.0
+
+# Environment Management
+python-dotenv==1.0.0
+
+# Async Support
+asyncio==3.4.3
+
+# Logging
+python-json-logger==2.0.7
+
+# Data Validation
+phonenumbers==8.13.27
+
+# Testing (optional)
+pytest==7.4.3
+pytest-asyncio==0.21.1
+
+# CORS
+python-multipart==0.0.6

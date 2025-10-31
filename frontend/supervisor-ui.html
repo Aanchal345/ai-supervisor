@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Supervisor Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes fade-in {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-in {
+            animation: fade-in 0.3s ease-out;
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen">
+    <div id="root"></div>
+
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+        
+        const API_BASE_URL = 'http://localhost:8000/api';
+
+        const SupervisorUI = () => {
+            const [activeTab, setActiveTab] = useState('pending');
+            const [helpRequests, setHelpRequests] = useState([]);
+            const [knowledgeBase, setKnowledgeBase] = useState([]);
+            const [stats, setStats] = useState({
+                pending_requests: 0,
+                resolved_requests: 0,
+                knowledge_entries: 0,
+                total_requests: 0
+            });
+            const [loading, setLoading] = useState(false);
+            const [selectedRequest, setSelectedRequest] = useState(null);
+            const [answerText, setAnswerText] = useState('');
+            const [searchQuery, setSearchQuery] = useState('');
+            const [notification, setNotification] = useState(null);
+            const [error, setError] = useState(null);
+            const iconsInitialized = useRef(false);
+
+            useEffect(() => {
+                fetchData();
+                const interval = setInterval(fetchData, 10000);
+                return () => clearInterval(interval);
+            }, [activeTab]);
+
+            useEffect(() => {
+                // Initialize Lucide icons only once
+                if (!iconsInitialized.current && window.lucide) {
+                    const initIcons = () => {
+                        try {
+                            lucide.createIcons();
+                            iconsInitialized.current = true;
+                        } catch (e) {
+                            console.log('Icons initialization skipped');
+                        }
+                    };
+                    
+                    // Delay to ensure DOM is ready
+                    setTimeout(initIcons, 200);
+                    
+                    // Re-init icons on significant state changes
+                    const observer = new MutationObserver(() => {
+                        if (window.lucide) {
+                            try {
+                                lucide.createIcons();
+                            } catch (e) {
+                                // Silently ignore icon errors
+                            }
+                        }
+                    });
+                    
+                    observer.observe(document.getElementById('root'), {
+                        childList: true,
+                        subtree: true
+                    });
+                    
+                    return () => observer.disconnect();
+                }
+            }, []);
+
+            const fetchData = async () => {
+                setLoading(true);
+                setError(null);
+                
+                try {
+                    let requestsUrl = `${API_BASE_URL}/help-requests/`;
+                    if (activeTab === 'pending') requestsUrl += '?status=pending';
+                    if (activeTab === 'resolved') requestsUrl += '?status=resolved';
+
+                    const [requestsRes, knowledgeRes, statsRes] = await Promise.all([
+                        fetch(requestsUrl),
+                        fetch(`${API_BASE_URL}/knowledge/`),
+                        fetch(`${API_BASE_URL}/supervisor/dashboard/stats`)
+                    ]);
+
+                    if (!requestsRes.ok || !knowledgeRes.ok || !statsRes.ok) {
+                        throw new Error('API call failed');
+                    }
+
+                    const requests = await requestsRes.json();
+                    const knowledge = await knowledgeRes.json();
+                    const dashStats = await statsRes.json();
+
+                    setHelpRequests(Array.isArray(requests) ? requests : []);
+                    setKnowledgeBase(Array.isArray(knowledge) ? knowledge : []);
+                    setStats(dashStats || stats);
+                    setError(null);
+                } catch (err) {
+                    console.error('Fetch error:', err);
+                    setError('Failed to connect to backend');
+                    showNotification('Failed to load data', 'error');
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const resolveRequest = async (requestId) => {
+                if (!answerText.trim()) {
+                    showNotification('Please enter an answer', 'error');
+                    return;
+                }
+
+                try {
+                    const response = await fetch(`${API_BASE_URL}/supervisor/${requestId}/resolve`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            supervisor_answer: answerText,
+                            supervisor_id: 'supervisor_1'
+                        })
+                    });
+
+                    if (response.ok) {
+                        showNotification('✅ Request resolved successfully!', 'success');
+                        setSelectedRequest(null);
+                        setAnswerText('');
+                        setTimeout(fetchData, 500);
+                    } else {
+                        showNotification('Failed to resolve request', 'error');
+                    }
+                } catch (err) {
+                    console.error('Resolve error:', err);
+                    showNotification('Network error', 'error');
+                }
+            };
+
+            const showNotification = (message, type) => {
+                setNotification({ message, type });
+                setTimeout(() => setNotification(null), 5000);
+            };
+
+            const formatDate = (dateString) => {
+                try {
+                    return new Date(dateString).toLocaleString();
+                } catch (e) {
+                    return dateString;
+                }
+            };
+
+            const filteredKnowledge = knowledgeBase.filter(entry => {
+                const searchLower = searchQuery.toLowerCase();
+                return (entry.question || '').toLowerCase().includes(searchLower) ||
+                       (entry.answer || '').toLowerCase().includes(searchLower);
+            });
+
+            return (
+                <div className="min-h-screen">
+                    {/* Header */}
+                    <div className="bg-white shadow-lg border-b border-gray-200">
+                        <div className="max-w-7xl mx-auto px-6 py-4">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <div className="bg-indigo-600 p-2 rounded-lg">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-white"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"/></svg>
+                                    </div>
+                                    <div>
+                                        <h1 className="text-2xl font-bold text-gray-900">AI Supervisor Dashboard</h1>
+                                        <p className="text-sm text-gray-600">Glamour Haven Salon</p>
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={fetchData}
+                                    disabled={loading}
+                                    className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition disabled:opacity-50"
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={loading ? 'animate-spin' : ''}><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
+                                    Refresh
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Error Banner */}
+                    {error && (
+                        <div className="max-w-7xl mx-auto px-6 mt-4">
+                            <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded">
+                                <p className="font-bold">⚠️ {error}</p>
+                                <p className="mt-2 text-sm">Make sure backend is running: <code className="bg-red-200 px-2 py-1 rounded">python run.py</code></p>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Notification */}
+                    {notification && (
+                        <div className="fixed top-20 right-6 z-50 animate-fade-in">
+                            <div className={`flex items-center gap-3 px-6 py-4 rounded-lg shadow-xl ${
+                                notification.type === 'success' ? 'bg-green-500' : 'bg-red-500'
+                            } text-white`}>
+                                <span className="font-medium">{notification.message}</span>
+                            </div>
+                        </div>
+                    )}
+
+                    <div className="max-w-7xl mx-auto px-6 py-6">
+                        {/* Stats */}
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                            <StatCard title="Pending" value={stats.pending_requests || 0} color="yellow" emoji="⏰" />
+                            <StatCard title="Resolved" value={stats.resolved_requests || 0} color="green" emoji="✅" />
+                            <StatCard title="Knowledge" value={stats.knowledge_entries || 0} color="blue" emoji="🧠" />
+                            <StatCard title="Total" value={stats.total_requests || 0} color="purple" emoji="💬" />
+                        </div>
+
+                        {/* Main Content */}
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            {/* Left Panel */}
+                            <div className="lg:col-span-2">
+                                <div className="bg-white rounded-xl shadow-lg overflow-hidden">
+                                    {/* Tabs */}
+                                    <div className="flex border-b border-gray-200">
+                                        <TabButton active={activeTab === 'pending'} onClick={() => setActiveTab('pending')} label="Pending" count={stats.pending_requests} />
+                                        <TabButton active={activeTab === 'resolved'} onClick={() => setActiveTab('resolved')} label="Resolved" count={stats.resolved_requests} />
+                                        <TabButton active={activeTab === 'knowledge'} onClick={() => setActiveTab('knowledge')} label="Knowledge" count={stats.knowledge_entries} />
+                                    </div>
+
+                                    {/* Content */}
+                                    <div className="p-6 min-h-96">
+                                        {activeTab !== 'knowledge' ? (
+                                            <div className="space-y-4">
+                                                {loading ? (
+                                                    <div className="flex justify-center py-12">
+                                                        <div className="animate-spin rounded-full h-12 w-12 border-4 border-indigo-200 border-t-indigo-600"></div>
+                                                    </div>
+                                                ) : helpRequests.length === 0 ? (
+                                                    <div className="text-center py-12 text-gray-500">
+                                                        <p className="text-4xl mb-4">📭</p>
+                                                        <p>No {activeTab} requests</p>
+                                                    </div>
+                                                ) : (
+                                                    helpRequests.map((request) => (
+                                                        <HelpRequestCard
+                                                            key={request.request_id}
+                                                            request={request}
+                                                            onSelect={setSelectedRequest}
+                                                            isSelected={selectedRequest?.request_id === request.request_id}
+                                                            formatDate={formatDate}
+                                                        />
+                                                    ))
+                                                )}
+                                            </div>
+                                        ) : (
+                                            <div className="space-y-4">
+                                                <div className="relative">
+                                                    <span className="absolute left-3 top-3 text-gray-400">🔍</span>
+                                                    <input
+                                                        type="text"
+                                                        placeholder="Search knowledge..."
+                                                        value={searchQuery}
+                                                        onChange={(e) => setSearchQuery(e.target.value)}
+                                                        className="w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                                    />
+                                                </div>
+
+                                                {loading ? (
+                                                    <div className="flex justify-center py-12">
+                                                        <div className="animate-spin rounded-full h-12 w-12 border-4 border-indigo-200 border-t-indigo-600"></div>
+                                                    </div>
+                                                ) : filteredKnowledge.length === 0 ? (
+                                                    <div className="text-center py-12 text-gray-500">
+                                                        <p>No knowledge entries found</p>
+                                                    </div>
+                                                ) : (
+                                                    filteredKnowledge.map((entry) => (
+                                                        <KnowledgeCard key={entry.entry_id} entry={entry} />
+                                                    ))
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Right Panel */}
+                            <div className="lg:col-span-1">
+                                {selectedRequest ? (
+                                    <div className="bg-white rounded-xl shadow-lg p-6 sticky top-6">
+                                        <h3 className="text-lg font-bold mb-4">Resolve Request</h3>
+                                        
+                                        <div className="space-y-4 mb-6">
+                                            <div className="p-3 bg-gray-50 rounded-lg">
+                                                <p className="text-xs text-gray-500 mb-1">Customer</p>
+                                                <p className="font-medium">👤 {selectedRequest.customer_name || 'Anonymous'}</p>
+                                                <p className="text-sm text-gray-600">📞 {selectedRequest.customer_phone}</p>
+                                            </div>
+
+                                            <div className="p-3 bg-yellow-50 rounded-lg border border-yellow-200">
+                                                <p className="text-xs text-gray-500 mb-1">Question</p>
+                                                <p className="font-medium">{selectedRequest.question}</p>
+                                            </div>
+                                        </div>
+
+                                        <div className="mb-4">
+                                            <label className="block text-sm font-medium mb-2">Your Answer</label>
+                                            <textarea
+                                                value={answerText}
+                                                onChange={(e) => setAnswerText(e.target.value)}
+                                                placeholder="Type your answer..."
+                                                rows={6}
+                                                className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 resize-none"
+                                            />
+                                        </div>
+
+                                        <div className="flex gap-2">
+                                            <button
+                                                onClick={() => resolveRequest(selectedRequest.request_id)}
+                                                className="flex-1 bg-green-600 text-white py-2 rounded-lg hover:bg-green-700 font-medium"
+                                            >
+                                                Resolve & Notify
+                                            </button>
+                                            <button
+                                                onClick={() => { setSelectedRequest(null); setAnswerText(''); }}
+                                                className="px-4 py-2 border rounded-lg hover:bg-gray-50"
+                                            >
+                                                Cancel
+                                            </button>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="bg-white rounded-xl shadow-lg p-6 text-center py-12 text-gray-500">
+                                        <p className="text-4xl mb-4">💬</p>
+                                        <p>Select a pending request</p>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const StatCard = ({ title, value, color, emoji }) => {
+            const colors = {
+                yellow: 'bg-yellow-100 text-yellow-600',
+                green: 'bg-green-100 text-green-600',
+                blue: 'bg-blue-100 text-blue-600',
+                purple: 'bg-purple-100 text-purple-600'
+            };
+
+            return (
+                <div className="bg-white rounded-xl shadow-md p-6">
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <p className="text-sm text-gray-600 mb-1">{title}</p>
+                            <p className="text-3xl font-bold">{value}</p>
+                        </div>
+                        <div className={`p-3 rounded-lg ${colors[color]} text-2xl`}>
+                            {emoji}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const TabButton = ({ active, onClick, label, count }) => (
+            <button
+                onClick={onClick}
+                className={`flex-1 px-6 py-4 font-medium transition ${
+                    active ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-600 hover:text-gray-900'
+                }`}
+            >
+                {label} {count !== undefined && <span className="ml-2 px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded-full text-xs">{count}</span>}
+            </button>
+        );
+
+        const HelpRequestCard = ({ request, onSelect, isSelected, formatDate }) => {
+            const statusColors = {
+                pending: 'bg-yellow-100 text-yellow-800 border-yellow-300',
+                resolved: 'bg-green-100 text-green-800 border-green-300',
+                timeout: 'bg-red-100 text-red-800 border-red-300'
+            };
+
+            return (
+                <div
+                    onClick={() => request.status === 'pending' && onSelect(request)}
+                    className={`p-4 border-2 rounded-lg transition ${
+                        request.status === 'pending' ? 'cursor-pointer' : 'cursor-default'
+                    } ${
+                        isSelected ? 'border-indigo-600 bg-indigo-50' : 'border-gray-200 hover:border-indigo-300'
+                    }`}
+                >
+                    <div className="flex items-start justify-between mb-3">
+                        <div>
+                            <p className="font-semibold">👤 {request.customer_name || 'Anonymous'}</p>
+                            <p className="text-sm text-gray-500">📞 {request.customer_phone}</p>
+                        </div>
+                        <span className={`px-3 py-1 rounded-full text-xs font-semibold border ${statusColors[request.status] || statusColors.pending}`}>
+                            {request.status}
+                        </span>
+                    </div>
+
+                    <div className="mb-2">
+                        <p className="text-sm text-gray-600 mb-1">Question:</p>
+                        <p className="font-medium">{request.question}</p>
+                    </div>
+
+                    {request.supervisor_answer && (
+                        <div className="mt-3 p-3 bg-green-50 rounded-lg border border-green-200">
+                            <p className="text-sm text-gray-600 mb-1">Answer:</p>
+                            <p className="text-sm">{request.supervisor_answer}</p>
+                        </div>
+                    )}
+
+                    <div className="mt-3 text-xs text-gray-500">🕐 {formatDate(request.created_at)}</div>
+                </div>
+            );
+        };
+
+        const KnowledgeCard = ({ entry }) => (
+            <div className="p-4 border rounded-lg hover:border-indigo-300">
+                <div className="flex justify-between mb-2">
+                    <p className="font-semibold flex-1">❓ {entry.question}</p>
+                    {entry.category && <span className="px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded-full ml-2">{entry.category}</span>}
+                </div>
+                <p className="text-gray-700 mb-3">💡 {entry.answer}</p>
+                <div className="flex justify-between text-xs text-gray-500">
+                    <div className="flex gap-2">
+                        {entry.keywords?.slice(0, 3).map((k, i) => <span key={i} className="px-2 py-1 bg-gray-100 rounded">{k}</span>)}
+                    </div>
+                    <span>📊 Used {entry.times_used || 0} times</span>
+                </div>
+            </div>
+        );
+
+        ReactDOM.render(<SupervisorUI />, document.getElementById('root'));
+    </script>
+</body>
+</html>
